@@ -1,0 +1,152 @@
+#!/bin/env bash
+# title            : check_persistent_cpu
+# description      : Revised check_cpu script controlling the alerts
+#
+# usage            : sh $0 options
+# options :
+#         -w <no. of hrs>
+#
+#         -c <no. of hrs>
+#
+#         -h Help
+#
+#==============================================================================
+
+source_file='/usr/local/nagios/libexec/check_cpu'
+
+usage()
+{
+cat << EOF
+
+usage: sh $0 options
+
+This plugin requires two arguments
+
+eg. sh $0 -w 6 -c 8
+
+OPTIONS:
+   -w <no. of hrs>
+
+   -c <no. of hrs>
+
+   -h Help
+
+EOF
+}
+
+null=''
+
+while getopts "w:c:h" OPTION
+do
+     case $OPTION in
+         h)
+             usage;   exit 3 ;;
+         w) t1=$OPTARG;;
+         c) t2=$OPTARG ;;
+
+         *)
+             usage; exit 3 ;;
+     esac
+done
+
+if [ "$1" = '' ]
+then
+    usage
+    exit 3
+fi
+
+if [ ! -f $source_file ] ; then
+    echo "ERROR - Source File NOT Found"; exit 3 ; fi
+
+# Loging status
+/usr/local/statusd/libexec/check_cpu -w 90,90,90,10 -c 95,95,95,5 -m mpstat -t avg &>/dev/null
+es=`echo $?`
+
+# loging output
+/usr/local/statusd/libexec/check_cpu -w 90,90,90,10 -c 95,95,95,5 -m mpstat -t avg > /tmp/check_cpu.txt
+
+status=`cat /tmp/check_cpu.txt | sed -n 1p | awk '{print $2}'`
+out=`cat /tmp/check_cpu.txt | sed -n '1!p'`
+
+t1=`echo "$t1 * 60 / 5" | bc`
+t2=`echo "$t2 * 60 / 5" | bc`
+
+
+#
+
+if [ "$status" == "CRITICAL" ]
+then
+    echo $status >> /tmp/check_cpu_status_CRIT.txt
+    count=`cat /tmp/check_cpu_status_CRIT.txt | wc -l`
+
+    if [ $count -gt $t2 ]
+    then
+        status=CRITICAL ;
+        echo "Load $status
+$out"
+        echo "line" > /tmp/check_cpu_status_WARN.txt
+        exit 2;
+    fi
+
+    if [ $count -gt $t1 ] && [ $count -lt $t2 ]
+    then
+        status=WARNING ;
+        echo "Load $status
+$out"
+        echo "line" > /tmp/check_cpu_status_WARN.txt
+        exit 1;
+    fi
+
+    if [ $count -gt 1 ] && [ $count -lt $t1 ]
+    then
+         status=OK ;
+        echo "Load $status
+$out"
+        echo "line" > /tmp/check_cpu_status_WARN.txt
+        exit 0;
+    fi
+
+elif [ "$status" == "OK" ]
+then
+    status=OK ;
+    echo "Load $status
+$out
+"
+    echo "line" > /tmp/check_cpu_status_CRIT.txt
+    echo "line" > /tmp/check_cpu_status_WARN.txt
+    exit 0;
+
+
+elif [ "$status" == "WARNING" ]
+then
+    echo $status >> /tmp/check_cpu_status_WARN.txt
+    count=`cat /tmp/check_cpu_status_WARN.txt | wc -l`
+
+    if [ $count -lt $t1 ]
+    then
+        status=OK;
+        echo "Load $status
+$out
+"
+        echo "line" > /tmp/check_cpu_status_CRIT.txt
+        exit 0;
+    fi
+
+    if [ $count -ge $t1 ]
+    then
+        status=WARNING;
+        echo "Load $status
+$out
+"
+        echo "line" > /tmp/check_cpu_status_CRIT.txt
+        exit 1;
+    fi
+
+else
+    echo "line" > /tmp/check_cpu_status_CRIT.txt
+    echo "line" > /tmp/check_cpu_status_WARN.txt
+    echo "Load $status
+$out"
+    exit $es;
+fi
+
